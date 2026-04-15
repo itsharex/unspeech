@@ -1,6 +1,8 @@
 package openai
 
 import (
+	"context"
+
 	"github.com/labstack/echo/v4"
 	"github.com/moeru-ai/unspeech/pkg/backend/types"
 	"github.com/samber/mo"
@@ -79,119 +81,48 @@ var (
 		{Name: "WAV", Extension: ".wav", MimeType: "audio/wav"},
 		{Name: "PCM", Extension: ".pcm", MimeType: "audio/pcm"},
 	}
+
+	voiceIDs = []struct{ ID, Name string }{
+		{"alloy", "Alloy"},
+		{"ash", "Ash"},
+		{"coral", "Coral"},
+		{"echo", "Echo"},
+		{"fable", "Fable"},
+		{"onyx", "Onyx"},
+		{"nova", "Nova"},
+		{"sage", "Sage"},
+		{"shimmer", "Shimmer"},
+	}
 )
 
-func HandleVoices(c echo.Context, options mo.Option[types.VoicesRequestOptions]) mo.Result[any] {
-	return mo.Ok[any](types.ListVoicesResponse{
-		Voices: []types.Voice{
-			{
-				ID:                "alloy",
-				Name:              "Alloy",
-				Description:       "",
-				Labels:            map[string]any{},
-				Tags:              make([]string, 0),
-				Languages:         languages,
-				Formats:           formats,
-				CompatibleModels:  []string{"tts-1", "tts-1-hd"},
-				PredefinedOptions: nil,
-				PreviewAudioURL:   "https://cdn.openai.com/API/docs/audio/alloy.wav",
-			},
-			{
-				ID:                "ash",
-				Name:              "Ash",
-				Description:       "",
-				Labels:            map[string]any{},
-				Tags:              make([]string, 0),
-				Languages:         languages,
-				Formats:           formats,
-				CompatibleModels:  []string{"tts-1", "tts-1-hd"},
-				PredefinedOptions: nil,
-				PreviewAudioURL:   "https://cdn.openai.com/API/docs/audio/ash.wav",
-			},
-			{
-				ID:                "coral",
-				Name:              "Coral",
-				Description:       "",
-				Labels:            map[string]any{},
-				Tags:              make([]string, 0),
-				Languages:         languages,
-				Formats:           formats,
-				CompatibleModels:  []string{"tts-1", "tts-1-hd"},
-				PredefinedOptions: nil,
-				PreviewAudioURL:   "https://cdn.openai.com/API/docs/audio/coral.wav",
-			},
-			{
-				ID:                "echo",
-				Name:              "Echo",
-				Description:       "",
-				Labels:            map[string]any{},
-				Tags:              make([]string, 0),
-				Languages:         languages,
-				Formats:           formats,
-				CompatibleModels:  []string{"tts-1", "tts-1-hd"},
-				PredefinedOptions: nil,
-				PreviewAudioURL:   "https://cdn.openai.com/API/docs/audio/echo.wav",
-			},
-			{
-				ID:                "fable",
-				Name:              "Fable",
-				Description:       "",
-				Labels:            map[string]any{},
-				Tags:              make([]string, 0),
-				Languages:         languages,
-				Formats:           formats,
-				CompatibleModels:  []string{"tts-1", "tts-1-hd"},
-				PredefinedOptions: nil,
-				PreviewAudioURL:   "https://cdn.openai.com/API/docs/audio/fable.wav",
-			},
-			{
-				ID:                "onyx",
-				Name:              "Onyx",
-				Description:       "",
-				Labels:            map[string]any{},
-				Tags:              make([]string, 0),
-				Languages:         languages,
-				Formats:           formats,
-				CompatibleModels:  []string{"tts-1", "tts-1-hd"},
-				PredefinedOptions: nil,
-				PreviewAudioURL:   "https://cdn.openai.com/API/docs/audio/onyx.wav",
-			},
-			{
-				ID:                "nova",
-				Name:              "Nova",
-				Description:       "",
-				Labels:            map[string]any{},
-				Tags:              make([]string, 0),
-				Languages:         languages,
-				Formats:           formats,
-				CompatibleModels:  []string{"tts-1", "tts-1-hd"},
-				PredefinedOptions: nil,
-				PreviewAudioURL:   "https://cdn.openai.com/API/docs/audio/nova.wav",
-			},
-			{
-				ID:                "sage",
-				Name:              "Sage",
-				Description:       "",
-				Labels:            map[string]any{},
-				Tags:              make([]string, 0),
-				Languages:         languages,
-				Formats:           formats,
-				CompatibleModels:  []string{"tts-1", "tts-1-hd"},
-				PredefinedOptions: nil,
-				PreviewAudioURL:   "https://cdn.openai.com/API/docs/audio/sage.wav",
-			},
-			{
-				ID:                "shimmer",
-				Name:              "Shimmer",
-				Description:       "",
-				Labels:            map[string]any{},
-				Tags:              make([]string, 0),
-				Languages:         languages,
-				Formats:           formats,
-				CompatibleModels:  []string{"tts-1", "tts-1-hd"},
-				PredefinedOptions: nil,
-				PreviewAudioURL:   "https://cdn.openai.com/API/docs/audio/shimmer.wav",
-			},
-		},
-	})
+// ListVoices returns the static list of OpenAI TTS voices.
+// OpenAI's TTS voice catalog is not fetched from an API — it's documented static data,
+// so this function is credential-free and always succeeds.
+func ListVoices(_ context.Context) ([]types.Voice, error) {
+	voices := make([]types.Voice, len(voiceIDs))
+	for i, v := range voiceIDs {
+		voices[i] = types.Voice{
+			ID:                v.ID,
+			Name:              v.Name,
+			Description:       "",
+			Labels:            map[string]any{},
+			Tags:              make([]string, 0),
+			Languages:         languages,
+			Formats:           formats,
+			CompatibleModels:  []string{"tts-1", "tts-1-hd"},
+			PredefinedOptions: nil,
+			PreviewAudioURL:   "https://cdn.openai.com/API/docs/audio/" + v.ID + ".wav",
+		}
+	}
+
+	return voices, nil
+}
+
+func HandleVoices(c echo.Context, _ mo.Option[types.VoicesRequestOptions]) mo.Result[any] {
+	voices, err := ListVoices(c.Request().Context())
+	if err != nil {
+		return mo.Err[any](err)
+	}
+
+	return mo.Ok[any](types.ListVoicesResponse{Voices: voices})
 }

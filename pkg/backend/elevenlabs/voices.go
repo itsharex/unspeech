@@ -1,7 +1,11 @@
 package elevenlabs
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -153,51 +157,55 @@ var (
 	}
 )
 
-func HandleVoices(c echo.Context, options mo.Option[types.VoicesRequestOptions]) mo.Result[any] {
-	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, "https://api.elevenlabs.io/v1/voices", nil)
+// VoicesCredentials holds the ElevenLabs API key for voices listing.
+type VoicesCredentials struct {
+	// APIKey is sent upstream as xi-api-key.
+	APIKey string
+}
+
+// UpstreamError carries a non-2xx response body from the ElevenLabs API.
+type UpstreamError struct {
+	StatusCode  int
+	ContentType string
+	Body        string
+}
+
+func (e *UpstreamError) Error() string {
+	return fmt.Sprintf("elevenlabs returned %d: %s", e.StatusCode, e.Body)
+}
+
+// ListVoices fetches the caller's ElevenLabs voices library and maps it to types.Voice.
+func ListVoices(ctx context.Context, creds VoicesCredentials) ([]types.Voice, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.elevenlabs.io/v1/voices", nil)
 	if err != nil {
-		return mo.Err[any](apierrors.NewErrInternal().WithError(err).WithCaller())
+		return nil, fmt.Errorf("elevenlabs: build request: %w", err)
 	}
 
-	if c.Request().Header.Get("Authorization") != "" {
+	if creds.APIKey != "" {
 		//nolint:canonicalheader
-		req.Header.Set("xi-api-key", strings.TrimPrefix(
-			c.Request().Header.Get("Authorization"),
-			"Bearer ",
-		))
+		req.Header.Set("xi-api-key", creds.APIKey)
 	}
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return mo.Err[any](apierrors.NewErrBadGateway().WithError(err).WithCaller())
+		return nil, fmt.Errorf("elevenlabs: call voices: %w", err)
 	}
 
 	defer func() { _ = res.Body.Close() }()
 
 	if res.StatusCode >= 400 && res.StatusCode < 600 {
-		switch {
-		case strings.HasPrefix(res.Header.Get("Content-Type"), "application/json"):
-			return mo.Err[any](apierrors.
-				NewUpstreamError(res.StatusCode).
-				WithDetail(utils.NewJSONResponseError(res.StatusCode, res.Body).OrEmpty().Error()))
-		case strings.HasPrefix(res.Header.Get("Content-Type"), "text/"):
-			return mo.Err[any](apierrors.
-				NewUpstreamError(res.StatusCode).
-				WithDetail(utils.NewTextResponseError(res.StatusCode, res.Body).OrEmpty().Error()))
-		default:
-			slog.Warn("unknown upstream error with unknown Content-Type",
-				slog.Int("status", res.StatusCode),
-				slog.String("content_type", res.Header.Get("Content-Type")),
-				slog.String("content_length", res.Header.Get("Content-Length")),
-			)
+		body, _ := io.ReadAll(res.Body)
+		return nil, &UpstreamError{
+			StatusCode:  res.StatusCode,
+			ContentType: res.Header.Get("Content-Type"),
+			Body:        string(body),
 		}
 	}
 
 	var response ListVoicesResponse
 
-	err = json.NewDecoder(res.Body).Decode(&response)
-	if err != nil {
-		return mo.Err[any](apierrors.NewErrBadGateway().WithError(err).WithCaller())
+	if err := json.NewDecoder(res.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("elevenlabs: decode voices: %w", err)
 	}
 
 	voices := make([]types.Voice, len(response.Voices))
@@ -225,7 +233,39 @@ func HandleVoices(c echo.Context, options mo.Option[types.VoicesRequestOptions])
 		}
 	}
 
-	return mo.Ok[any](types.ListVoicesResponse{
-		Voices: voices,
-	})
+	return voices, nil
+}
+
+func HandleVoices(c echo.Context, _ mo.Option[types.VoicesRequestOptions]) mo.Result[any] {
+	creds := VoicesCredentials{
+		APIKey: strings.TrimPrefix(c.Request().Header.Get("Authorization"), "Bearer "),
+	}
+
+	voices, err := ListVoices(c.Request().Context(), creds)
+	if err != nil {
+		var upErr *UpstreamError
+		if errors.As(err, &upErr) {
+			switch {
+			case strings.HasPrefix(upErr.ContentType, "application/json"):
+				return mo.Err[any](apierrors.
+					NewUpstreamError(upErr.StatusCode).
+					WithDetail(utils.NewJSONResponseError(upErr.StatusCode, strings.NewReader(upErr.Body)).OrEmpty().Error()))
+			case strings.HasPrefix(upErr.ContentType, "text/"):
+				return mo.Err[any](apierrors.
+					NewUpstreamError(upErr.StatusCode).
+					WithDetail(utils.NewTextResponseError(upErr.StatusCode, strings.NewReader(upErr.Body)).OrEmpty().Error()))
+			default:
+				slog.Warn("unknown upstream error with unknown Content-Type",
+					slog.Int("status", upErr.StatusCode),
+					slog.String("content_type", upErr.ContentType),
+				)
+
+				return mo.Err[any](apierrors.NewUpstreamError(upErr.StatusCode).WithDetail(upErr.Body))
+			}
+		}
+
+		return mo.Err[any](apierrors.NewErrBadGateway().WithError(err).WithCaller())
+	}
+
+	return mo.Ok[any](types.ListVoicesResponse{Voices: voices})
 }

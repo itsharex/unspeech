@@ -1,7 +1,11 @@
 package microsoft
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -84,38 +88,72 @@ type Voice struct {
 	WordsPerMinute  string                `json:"WordsPerMinute"`
 }
 
-func HandleVoices(c echo.Context, options mo.Option[types.VoicesRequestOptions]) mo.Result[any] {
-	region := options.MustGet().ExtraQuery.Get("region")
-	if region == "" {
-		region = "eastasia"
+// masterpiecePreviewURL builds the Azure "Masterpieces" sample audio URL for a voice.
+// The blob key is derived from ShortName by stripping the trailing "Neural" suffix
+// (traditional voices like en-US-JennyNeural -> en-US-Jenny) and removing the ":"
+// separator that newer HD/Dragon voice ShortNames embed
+// (zh-CN-Xiaoxiao2:DragonHDFlashLatestNeural -> zh-CN-Xiaoxiao2DragonHDFlashLatest).
+// Using DisplayName here would URL-encode spaces and 404 against the blob service.
+func masterpiecePreviewURL(shortName string) string {
+	slug := strings.TrimSuffix(shortName, "Neural")
+	slug = strings.ReplaceAll(slug, ":", "")
+
+	return "https://ai.azure.com/speechassetscache/ttsvoice/Masterpieces/" + slug + "-General-Audio.wav"
+}
+
+// VoicesCredentials are the per-request inputs needed to hit Azure Speech voices/list.
+type VoicesCredentials struct {
+	// Region is an Azure region identifier, e.g. "eastasia".
+	Region string
+	// SubscriptionKey is the Ocp-Apim-Subscription-Key value.
+	SubscriptionKey string
+}
+
+// UpstreamError represents a non-2xx response from Azure Speech.
+// Callers can errors.As() this to surface upstream status to their own HTTP clients.
+type UpstreamError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *UpstreamError) Error() string {
+	return fmt.Sprintf("microsoft speech returned %d: %s", e.StatusCode, e.Body)
+}
+
+// ListVoices calls Azure Speech "voices/list" and maps the response to unspeech's types.Voice.
+func ListVoices(ctx context.Context, creds VoicesCredentials) ([]types.Voice, error) {
+	if creds.Region == "" {
+		return nil, errors.New("microsoft: region is required")
 	}
 
-	req, err := http.NewRequestWithContext(c.Request().Context(), http.MethodGet, "https://"+region+".tts.speech.microsoft.com/cognitiveservices/voices/list", nil)
+	if creds.SubscriptionKey == "" {
+		return nil, errors.New("microsoft: subscription key is required")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"https://"+creds.Region+".tts.speech.microsoft.com/cognitiveservices/voices/list", nil)
 	if err != nil {
-		return mo.Err[any](apierrors.NewErrInternal().WithError(err).WithCaller())
+		return nil, fmt.Errorf("microsoft: build request: %w", err)
 	}
 
-	req.Header.Set("Ocp-Apim-Subscription-Key", strings.TrimPrefix(c.Request().Header.Get("Authorization"), "Bearer "))
+	req.Header.Set("Ocp-Apim-Subscription-Key", creds.SubscriptionKey)
 
 	res, err := httpClient.Do(req)
 	if err != nil {
-		return mo.Err[any](apierrors.NewErrBadGateway().WithError(err).WithCaller())
+		return nil, fmt.Errorf("microsoft: call voices/list: %w", err)
 	}
 
 	defer func() { _ = res.Body.Close() }()
 
 	if res.StatusCode >= 400 && res.StatusCode < 600 {
-		resError := handleResponseError(res)
-		if resError.IsError() {
-			return resError
-		}
+		body, _ := io.ReadAll(res.Body)
+		return nil, &UpstreamError{StatusCode: res.StatusCode, Body: string(body)}
 	}
 
 	var response []Voice
 
-	err = json.NewDecoder(res.Body).Decode(&response)
-	if err != nil {
-		return mo.Err[any](apierrors.NewErrInternal().WithError(err).WithCaller())
+	if err := json.NewDecoder(res.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("microsoft: decode voices: %w", err)
 	}
 
 	voices := make([]types.Voice, 0, len(response))
@@ -145,7 +183,7 @@ func HandleVoices(c echo.Context, options mo.Option[types.VoicesRequestOptions])
 			Tags:             tags,
 			Formats:          formats,
 			CompatibleModels: []string{"v1"},
-			PreviewAudioURL:  "https://staticassets.api.speech.microsoft.com/blobs/ttsvoice/Masterpieces/" + voice.Locale + "-" + voice.DisplayName + "-General-Audio.wav",
+			PreviewAudioURL: masterpiecePreviewURL(voice.ShortName),
 			Languages: []types.VoiceLanguage{
 				{
 					Title: voice.LocalName,
@@ -155,7 +193,37 @@ func HandleVoices(c echo.Context, options mo.Option[types.VoicesRequestOptions])
 		})
 	}
 
-	return mo.Ok[any](types.ListVoicesResponse{
-		Voices: voices,
-	})
+	return voices, nil
+}
+
+func HandleVoices(c echo.Context, options mo.Option[types.VoicesRequestOptions]) mo.Result[any] {
+	region := options.MustGet().ExtraQuery.Get("region")
+	if region == "" {
+		region = "eastasia"
+	}
+
+	creds := VoicesCredentials{
+		Region:          region,
+		SubscriptionKey: strings.TrimPrefix(c.Request().Header.Get("Authorization"), "Bearer "),
+	}
+
+	voices, err := ListVoices(c.Request().Context(), creds)
+	if err != nil {
+		var upErr *UpstreamError
+		if errors.As(err, &upErr) {
+			res := &http.Response{
+				StatusCode: upErr.StatusCode,
+				Body:       io.NopCloser(strings.NewReader(upErr.Body)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}
+
+			if resError := handleResponseError(res); resError.IsError() {
+				return resError
+			}
+		}
+
+		return mo.Err[any](apierrors.NewErrInternal().WithError(err).WithCaller())
+	}
+
+	return mo.Ok[any](types.ListVoicesResponse{Voices: voices})
 }

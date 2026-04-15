@@ -1,9 +1,10 @@
 package alibaba
 
 import (
+	"context"
 	_ "embed"
-
 	"encoding/json"
+	"fmt"
 
 	"github.com/labstack/echo/v4"
 	"github.com/moeru-ai/unspeech/pkg/apierrors"
@@ -27,12 +28,13 @@ type VoicesResponseItem struct {
 	Format          string   `json:"format"`
 }
 
-func HandleVoices(c echo.Context, options mo.Option[types.VoicesRequestOptions]) mo.Result[any] {
+// ListVoices returns Alibaba's static voice catalogue embedded at build time.
+// No credentials are required because Alibaba does not expose a public voices/list API.
+func ListVoices(_ context.Context) ([]types.Voice, error) {
 	var voicesResponse []VoicesResponseItem
 
-	err := json.Unmarshal([]byte(voicesJSON), &voicesResponse)
-	if err != nil {
-		return mo.Err[any](apierrors.NewErrInternal().WithDetail(err.Error()).WithCaller())
+	if err := json.Unmarshal([]byte(voicesJSON), &voicesResponse); err != nil {
+		return nil, fmt.Errorf("alibaba: decode embedded voices: %w", err)
 	}
 
 	voices := make([]types.Voice, 0, len(voicesResponse))
@@ -78,7 +80,14 @@ func HandleVoices(c echo.Context, options mo.Option[types.VoicesRequestOptions])
 		})
 	}
 
-	return mo.Ok[any](types.ListVoicesResponse{
-		Voices: voices,
-	})
+	return voices, nil
+}
+
+func HandleVoices(c echo.Context, _ mo.Option[types.VoicesRequestOptions]) mo.Result[any] {
+	voices, err := ListVoices(c.Request().Context())
+	if err != nil {
+		return mo.Err[any](apierrors.NewErrInternal().WithDetail(err.Error()).WithCaller())
+	}
+
+	return mo.Ok[any](types.ListVoicesResponse{Voices: voices})
 }
