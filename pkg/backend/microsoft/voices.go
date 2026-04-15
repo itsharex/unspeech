@@ -152,7 +152,8 @@ func ListVoices(ctx context.Context, creds VoicesCredentials) ([]types.Voice, er
 
 	var response []Voice
 
-	if err := json.NewDecoder(res.Body).Decode(&response); err != nil {
+	err = json.NewDecoder(res.Body).Decode(&response)
+	if err != nil {
 		return nil, fmt.Errorf("microsoft: decode voices: %w", err)
 	}
 
@@ -183,7 +184,7 @@ func ListVoices(ctx context.Context, creds VoicesCredentials) ([]types.Voice, er
 			Tags:             tags,
 			Formats:          formats,
 			CompatibleModels: []string{"v1"},
-			PreviewAudioURL: masterpiecePreviewURL(voice.ShortName),
+			PreviewAudioURL:  masterpiecePreviewURL(voice.ShortName),
 			Languages: []types.VoiceLanguage{
 				{
 					Title: voice.LocalName,

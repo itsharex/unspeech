@@ -59,7 +59,8 @@ type VoicesResponse struct {
 func ListVoices(_ context.Context) ([]types.Voice, error) {
 	var voicesData VoicesResponse
 
-	if err := json.Unmarshal([]byte(voicesJSON), &voicesData); err != nil {
+	err := json.Unmarshal([]byte(voicesJSON), &voicesData)
+	if err != nil {
 		return nil, fmt.Errorf("volcengine: decode embedded voices: %w", err)
 	}
 

@@ -35,12 +35,12 @@ type ssml struct {
 }
 
 type extraBody struct {
-	DisableSSML  mo.Option[bool]   `json:"disable_ssml,omitempty"`
+	DisableSSML  mo.Option[bool]   `json:"disable_ssml,omitzero"`
 	Region       string            `json:"region"`
-	DeploymentID mo.Option[string] `json:"deployment_id,omitempty"`
-	Lang         mo.Option[string] `json:"lang,omitempty"`
-	Gender       mo.Option[string] `json:"gender,omitempty"`
-	SampleRate   mo.Option[uint]   `json:"sample_rate,omitempty"`
+	DeploymentID mo.Option[string] `json:"deployment_id,omitzero"`
+	Lang         mo.Option[string] `json:"lang,omitzero"`
+	Gender       mo.Option[string] `json:"gender,omitzero"`
+	SampleRate   mo.Option[uint]   `json:"sample_rate,omitzero"`
 }
 
 var (

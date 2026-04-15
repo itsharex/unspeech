@@ -82,7 +82,8 @@ func ListVoices(ctx context.Context, creds VoicesCredentials) ([]types.Voice, er
 
 	var response DeepgramModelsResponse
 
-	if err := json.NewDecoder(res.Body).Decode(&response); err != nil {
+	err = json.NewDecoder(res.Body).Decode(&response)
+	if err != nil {
 		return nil, fmt.Errorf("deepgram: decode models: %w", err)
 	}
 

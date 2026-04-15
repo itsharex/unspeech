@@ -195,6 +195,7 @@ func ListVoices(ctx context.Context, creds VoicesCredentials) ([]types.Voice, er
 
 	if res.StatusCode >= 400 && res.StatusCode < 600 {
 		body, _ := io.ReadAll(res.Body)
+
 		return nil, &UpstreamError{
 			StatusCode:  res.StatusCode,
 			ContentType: res.Header.Get("Content-Type"),
@@ -204,7 +205,8 @@ func ListVoices(ctx context.Context, creds VoicesCredentials) ([]types.Voice, er
 
 	var response ListVoicesResponse
 
-	if err := json.NewDecoder(res.Body).Decode(&response); err != nil {
+	err = json.NewDecoder(res.Body).Decode(&response)
+	if err != nil {
 		return nil, fmt.Errorf("elevenlabs: decode voices: %w", err)
 	}
 

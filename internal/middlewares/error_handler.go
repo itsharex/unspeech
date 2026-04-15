@@ -23,8 +23,9 @@ func HandleErrors() echo.MiddlewareFunc {
 					slog.Error("unknown error responded", slog.Any("error", err.Error()))
 				}
 				if 500 >= errResp.Status || errResp.Status < 600 {
-					attrs := make([]slog.Attr, 0)
-					attrs = append(attrs, logs.Caller(errResp.Caller())...)
+					callerAttrs := logs.Caller(errResp.Caller())
+					attrs := make([]slog.Attr, 0, len(callerAttrs)+1)
+					attrs = append(attrs, callerAttrs...)
 					attrs = append(attrs, slog.Any("error", errResp.Error()))
 					slog.Error("error occurred during request", lo.ToAnySlice(attrs)...)
 				}

@@ -33,7 +33,8 @@ type VoicesResponseItem struct {
 func ListVoices(_ context.Context) ([]types.Voice, error) {
 	var voicesResponse []VoicesResponseItem
 
-	if err := json.Unmarshal([]byte(voicesJSON), &voicesResponse); err != nil {
+	err := json.Unmarshal([]byte(voicesJSON), &voicesResponse)
+	if err != nil {
 		return nil, fmt.Errorf("alibaba: decode embedded voices: %w", err)
 	}
 
